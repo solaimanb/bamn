@@ -5,7 +5,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import debounce from 'lodash/debounce';
+import throttle from 'lodash/throttle';
 import {
     Ion,
     Color,
@@ -21,10 +21,15 @@ import {
     ScreenSpaceEventType,
     ScreenSpaceEventHandler,
     HeightReference,
-    LabelGraphics,
     OpenStreetMapImageryProvider,
     ImageryLayer,
     BillboardGraphics,
+    Scene,
+    SceneMode,
+    Rectangle,
+    Camera,
+    CameraEventType,
+    KeyboardEventModifier,
 } from '@cesium/engine';
 import { Viewer } from '@cesium/widgets';
 import { Mentor } from '@/types/mentor';
@@ -40,6 +45,133 @@ interface MentorGlobeCesiumProps {
     mentors?: MentorLocation[];
     onMentorClick?: (mentor: MentorLocation) => void;
 }
+
+const PERFORMANCE_CONSTANTS = {
+    MOBILE_BREAKPOINT: 768,
+    FRAME_RATE_LIMIT: 30,
+    HOVER_THROTTLE_MS: 32,
+    BATCH_SIZE: 50,
+    GRID_SIZE: 1,
+    HOVER_RADIUS_PX: 40,
+    MOBILE_TILE_SIZE: 256,
+    DESKTOP_TILE_SIZE: 512,
+    MIN_ZOOM_DISTANCE: 1000000, // 1000km
+    MAX_ZOOM_DISTANCE: 20000000, // 20000km
+    CAMERA_BOUNDS: Rectangle.fromDegrees(-180, -85, 180, 85),
+    TERRAIN_EXAGGERATION: 1.0,
+    CAMERA_MOVEMENT_SPEED: 1.5, // Increased from 0.5 for smoother movement
+    TOUCH_MOVEMENT_SPEED: 0.5,  // New constant for touch movement
+    INERTIA_ENABLED: true,      // New constant for inertia
+} as const;
+
+const performanceUtils = {
+    setupWebGLContext: (): WebGLRenderingContext | null => {
+        try {
+            const canvas = document.createElement('canvas');
+            const contextAttributes: WebGLContextAttributes = {
+                alpha: false,
+                depth: true,
+                stencil: false,
+                antialias: false,
+                powerPreference: 'high-performance',
+                failIfMajorPerformanceCaveat: false,
+                preserveDrawingBuffer: false,
+            };
+            return canvas.getContext('webgl', contextAttributes) as WebGLRenderingContext;
+        } catch {
+            return null;
+        }
+    },
+
+    optimizeScene: (scene: Scene, isMobile: boolean) => {
+        // Core optimizations
+        scene.globe.enableLighting = false;
+        scene.globe.showGroundAtmosphere = false;
+        scene.globe.showWaterEffect = false;
+        scene.globe.backFaceCulling = true;
+        scene.globe.tileCacheSize = isMobile ? 25 : 100;
+        scene.globe.maximumScreenSpaceError = isMobile ? 3 : 2;
+        scene.globe.baseColor = Color.WHITE;
+        scene.globe.translucency.enabled = false;
+        scene.globe.preloadSiblings = false;
+        scene.globe.terrainExaggeration = PERFORMANCE_CONSTANTS.TERRAIN_EXAGGERATION;
+
+        // Fog and atmosphere
+        scene.fog.enabled = false;
+        scene.fog.density = 0;
+        scene.skyAtmosphere.show = false;
+        scene.sun.show = false;
+        scene.moon.show = false;
+        scene.skyBox.show = false;
+
+        // Advanced rendering settings
+        scene.postProcessStages.fxaa.enabled = !isMobile;
+        scene.msaaSamples = isMobile ? 1 : 4;
+        scene.requestRenderMode = true;
+        scene.maximumRenderTimeChange = Infinity;
+
+        // Camera constraints and touch optimization
+        const controller = scene.screenSpaceCameraController;
+        controller.enableCollisionDetection = true;
+        controller.minimumZoomDistance = PERFORMANCE_CONSTANTS.MIN_ZOOM_DISTANCE;
+        controller.maximumZoomDistance = PERFORMANCE_CONSTANTS.MAX_ZOOM_DISTANCE;
+        controller.enableTilt = false;
+
+        // Touch-specific optimizations
+        if (isMobile) {
+            // Enable smooth inertia
+            controller.inertiaSpin = 0.9;           // Adjust spin speed
+            controller.inertiaTranslate = 0.9;      // Adjust pan speed
+            controller.inertiaZoom = 0.8;           // Adjust zoom speed
+
+            controller.rotateEventTypes = [
+                CameraEventType.LEFT_DRAG,
+                CameraEventType.PINCH,
+                {
+                    eventType: CameraEventType.PINCH,
+                    modifier: KeyboardEventModifier.SHIFT
+                }
+            ];
+
+            // Adjust movement speeds for touch
+            controller.translateEventTypes = [
+                CameraEventType.LEFT_DRAG,
+                {
+                    eventType: CameraEventType.LEFT_DRAG,
+                    modifier: KeyboardEventModifier.SHIFT
+                }
+            ];
+
+            // Enable core interactions
+            controller.enableInputs = true;
+            controller.enableZoom = true;
+            controller.enableRotate = true;
+            controller.enableTilt = false;
+            controller.enableLook = false;
+        }
+    },
+
+    setupCamera: (camera: Camera) => {
+        // Optimize camera movement
+        camera.defaultMoveAmount = PERFORMANCE_CONSTANTS.CAMERA_MOVEMENT_SPEED;
+        camera.defaultLookAmount = PERFORMANCE_CONSTANTS.CAMERA_MOVEMENT_SPEED;
+        camera.defaultRotateAmount = PERFORMANCE_CONSTANTS.CAMERA_MOVEMENT_SPEED;
+        camera.defaultZoomAmount = PERFORMANCE_CONSTANTS.CAMERA_MOVEMENT_SPEED;
+
+        // Constrain camera movement
+        camera.constrainedAxis = Cartesian3.UNIT_Z;
+        camera.maximumZoomFactor = 5;
+    },
+
+    optimizeImageryProvider: (isMobile: boolean) => {
+        return new OpenStreetMapImageryProvider({
+            url: 'https://a.tile.openstreetmap.org/',
+            minimumLevel: 0,
+            maximumLevel: isMobile ? 17 : 19,
+            credit: ''
+        });
+    },
+};
 
 const getOffsetCoordinates = (
     mentors: MentorLocation[],
@@ -95,11 +227,11 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
     const hoverStates = useRef<Map<string, boolean>>(new Map());
     const [selectedMentor, setSelectedMentor] = useState<MentorLocation | null>(null);
     const lastFrameTime = useRef<number>(0);
-    const frameRateLimit = 30;
     const [retryCount, setRetryCount] = useState(0);
     const maxRetries = 3;
-    const retryDelay = 2000; // 2 seconds
+    const retryDelay = 2000;
     const mentorClusters = useMentorClusters(mentors);
+    const isMobile = typeof window !== 'undefined' ? window.innerWidth < PERFORMANCE_CONSTANTS.MOBILE_BREAKPOINT : false;
 
     const containerStyle = useMemo<React.CSSProperties>(() => ({
         position: 'fixed',
@@ -119,7 +251,6 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
     const createMentorEntity = useCallback((viewer: Viewer, mentor: MentorLocation) => {
         if (!mentor.latitude || !mentor.longitude) return null;
 
-        // Use memoized clusters instead of filtering every time
         const key = `${mentor.latitude},${mentor.longitude}`;
         const locationMentors = mentorClusters.get(key) || [];
         const index = locationMentors.findIndex(m => m.id === mentor.id);
@@ -180,7 +311,7 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
                 scale: 0.9,
                 distanceDisplayCondition: new DistanceDisplayCondition(2.0e6, 2.0e7),
                 disableDepthTestDistance: Number.POSITIVE_INFINITY,
-                show: false,
+                show: new CallbackProperty(() => false, false),
                 heightReference: HeightReference.RELATIVE_TO_GROUND,
                 eyeOffset: new Cartesian3(0, 0, -10),
                 translucencyByDistance: new NearFarScalar(2.0e6, 1.0, 2.0e7, 0.3)
@@ -188,101 +319,147 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
         });
     }, [mentors, mentorClusters]);
 
-    const updateHoverStates = useCallback((
-        viewer: Viewer,
-        movement: { endPosition: Cartesian2 },
-        entities: EntityCollection
-    ) => {
-        if (!movement || !movement.endPosition) return;
+    /** Updates mentor entities and sets up hover interactions */
+    useEffect(() => {
+        if (!viewer) return;
 
-        const scene = viewer.scene;
-        const camera = viewer.camera;
-        const ellipsoid = scene.globe.ellipsoid;
-        const ray = camera.getPickRay(movement.endPosition);
-        if (!ray) return;
+        if (mentorEntities.current) {
+            viewer.entities.removeAll();
+            mentorEntities.current = null;
+        }
 
-        const pickedPosition = scene.globe.pick(ray, scene);
-        if (!pickedPosition) return;
+        hoverStates.current.clear();
+        mentorEntities.current = new EntityCollection();
 
-        // Get picked coordinates
-        const pickedCartographic = ellipsoid.cartesianToCartographic(pickedPosition);
-        const pickedLat = CesiumMath.toDegrees(pickedCartographic.latitude);
-        const pickedLon = CesiumMath.toDegrees(pickedCartographic.longitude);
+        const totalBatches = Math.ceil(mentors.length / PERFORMANCE_CONSTANTS.BATCH_SIZE);
+        let processedBatches = 0;
 
-        // Performance optimization: Only process entities within a certain radius
-        const MAX_DISTANCE = 2; // degrees
-        let needsUpdate = false;
+        const processBatch = (startIndex: number) => {
+            const endIndex = Math.min(startIndex + PERFORMANCE_CONSTANTS.BATCH_SIZE, mentors.length);
+            const batch = mentors.slice(startIndex, endIndex);
 
-        entities.values.forEach(entity => {
-            if (!entity.position) return;
+            batch.forEach(mentor => {
+                createMentorEntity(viewer, mentor);
+            });
 
-            const position = entity.position.getValue(viewer.clock.currentTime);
-            if (!position) return;
-
-            const cartographic = ellipsoid.cartesianToCartographic(position);
-            const entityLat = CesiumMath.toDegrees(cartographic.latitude);
-            const entityLon = CesiumMath.toDegrees(cartographic.longitude);
-
-            // Quick distance check
-            const latDiff = Math.abs(entityLat - pickedLat);
-            const lonDiff = Math.abs(entityLon - pickedLon);
-
-            // Skip if too far
-            if (latDiff > MAX_DISTANCE || lonDiff > MAX_DISTANCE) {
-                const currentState = hoverStates.current.get(entity.id as string);
-                if (currentState) {
-                    needsUpdate = true;
-                    hoverStates.current.set(entity.id as string, false);
-                    if (entity.label instanceof LabelGraphics) {
-                        entity.label.show = new CallbackProperty(() => false, false);
-                    }
-                }
-                return;
+            processedBatches++;
+            if (processedBatches === totalBatches) {
+                viewer.scene.requestRender();
             }
+        };
 
-            // Accurate distance check for close entities
-            const distance = Math.sqrt(latDiff * latDiff + lonDiff * lonDiff);
-            if (distance > 1) {
-                const currentState = hoverStates.current.get(entity.id as string);
-                if (currentState) {
-                    needsUpdate = true;
-                    hoverStates.current.set(entity.id as string, false);
-                    if (entity.label instanceof LabelGraphics) {
-                        entity.label.show = new CallbackProperty(() => false, false);
-                    }
+        processBatch(0);
+
+        if (totalBatches > 1) {
+            let currentBatch = 1;
+            const processNextBatch = () => {
+                if (currentBatch < totalBatches) {
+                    processBatch(currentBatch * PERFORMANCE_CONSTANTS.BATCH_SIZE);
+                    currentBatch++;
+                    requestAnimationFrame(processNextBatch);
                 }
-                return;
-            }
+            };
+            requestAnimationFrame(processNextBatch);
+        }
 
-            // Screen space check for close entities
-            const windowCoords = scene.cartesianToCanvasCoordinates(position);
-            if (!windowCoords) return;
+        const spatialIndex = new Map<string, Set<string>>();
 
-            const dx = movement.endPosition.x - windowCoords.x;
-            const dy = movement.endPosition.y - windowCoords.y;
-            const screenDistance = Math.sqrt(dx * dx + dy * dy);
-            const isHovered = screenDistance <= 40;
-
-            const currentState = hoverStates.current.get(entity.id as string);
-            if (currentState !== isHovered) {
-                needsUpdate = true;
-                hoverStates.current.set(entity.id as string, isHovered);
-                if (entity.label instanceof LabelGraphics) {
-                    entity.label.show = new CallbackProperty(() => isHovered, false);
-                }
-            }
+        mentors.forEach(mentor => {
+            if (!mentor.latitude || !mentor.longitude) return;
+            const gridKey = `${Math.floor(mentor.latitude / PERFORMANCE_CONSTANTS.GRID_SIZE)},${Math.floor(mentor.longitude / PERFORMANCE_CONSTANTS.GRID_SIZE)}`;
+            const cell = spatialIndex.get(gridKey) || new Set();
+            cell.add(mentor.id);
+            spatialIndex.set(gridKey, cell);
         });
 
-        // Only request render if states actually changed
-        if (needsUpdate) {
-            scene.requestRender();
-        }
-    }, []);
+        const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
 
-    const debouncedUpdateHoverStates = useMemo(
-        () => debounce(updateHoverStates, 16),
-        [updateHoverStates]
-    );
+        const throttledUpdateHover = throttle((movement: { endPosition: Cartesian2 }) => {
+            if (!movement?.endPosition || !viewer || viewer.isDestroyed()) return;
+
+            const scene = viewer.scene;
+            const camera = viewer.camera;
+            const ellipsoid = scene.globe.ellipsoid;
+            const ray = camera.getPickRay(movement.endPosition);
+            if (!ray) return;
+
+            const pickedPosition = scene.globe.pick(ray, scene);
+            if (!pickedPosition) return;
+
+            const pickedCartographic = ellipsoid.cartesianToCartographic(pickedPosition);
+            const pickedLat = CesiumMath.toDegrees(pickedCartographic.latitude);
+            const pickedLon = CesiumMath.toDegrees(pickedCartographic.longitude);
+
+            const gridKey = `${Math.floor(pickedLat / PERFORMANCE_CONSTANTS.GRID_SIZE)},${Math.floor(pickedLon / PERFORMANCE_CONSTANTS.GRID_SIZE)}`;
+            const nearbyEntities = spatialIndex.get(gridKey) || new Set();
+
+            let needsUpdate = false;
+            const currentHoverStates = new Set<string>();
+
+            viewer.entities.values.forEach(entity => {
+                if (!entity.position || !nearbyEntities.has(entity.id as string)) {
+                    const currentState = hoverStates.current.get(entity.id as string);
+                    if (currentState) {
+                        needsUpdate = true;
+                        hoverStates.current.set(entity.id as string, false);
+                        if (entity.label) {
+                            entity.label.show = new CallbackProperty(() => false, false);
+                        }
+                    }
+                    return;
+                }
+
+                const position = entity.position.getValue(viewer.clock.currentTime);
+                if (!position) return;
+
+                const windowCoords = scene.cartesianToCanvasCoordinates(position);
+                if (!windowCoords) return;
+
+                const dx = movement.endPosition.x - windowCoords.x;
+                const dy = movement.endPosition.y - windowCoords.y;
+                const screenDistance = Math.sqrt(dx * dx + dy * dy);
+                const isHovered = screenDistance <= PERFORMANCE_CONSTANTS.HOVER_RADIUS_PX;
+
+                currentHoverStates.add(entity.id as string);
+
+                const currentState = hoverStates.current.get(entity.id as string);
+                if (currentState !== isHovered) {
+                    needsUpdate = true;
+                    hoverStates.current.set(entity.id as string, isHovered);
+                    if (entity.label) {
+                        entity.label.show = new CallbackProperty(() => isHovered, false);
+                    }
+                }
+            });
+
+            hoverStates.current.forEach((state, id) => {
+                if (!currentHoverStates.has(id) && state) {
+                    needsUpdate = true;
+                    hoverStates.current.set(id, false);
+                }
+            });
+
+            if (needsUpdate) {
+                scene.requestRender();
+            }
+        }, PERFORMANCE_CONSTANTS.HOVER_THROTTLE_MS, { leading: true, trailing: true });
+
+        handler.setInputAction((movement: { endPosition: Cartesian2 }) => {
+            const now = Date.now();
+            if (now - lastFrameTime.current < 1000 / PERFORMANCE_CONSTANTS.FRAME_RATE_LIMIT) return;
+            lastFrameTime.current = now;
+
+            throttledUpdateHover(movement);
+        }, ScreenSpaceEventType.MOUSE_MOVE);
+
+        return () => {
+            throttledUpdateHover.cancel();
+            if (handler && !viewer.isDestroyed()) {
+                handler.destroy();
+            }
+        };
+
+    }, [viewer, mentors, createMentorEntity]);
 
     /** Handles click events on mentor points */
     const handleClick = useCallback((movement: { position: Cartesian2 }) => {
@@ -300,6 +477,20 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
             }
         }
     }, [viewer, mentors, onMentorClick, selectedMentor]);
+
+    /** Sets up click handlers for mentor selection */
+    useEffect(() => {
+        if (!viewer) return;
+
+        const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
+        handler.setInputAction(handleClick, ScreenSpaceEventType.LEFT_CLICK);
+
+        return () => {
+            if (!viewer.isDestroyed()) {
+                handler.destroy();
+            }
+        };
+    }, [viewer, handleClick]);
 
     /** Initializes container dimensions and sets up resize observer */
     useEffect(() => {
@@ -327,93 +518,6 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
         }
     }, []);
 
-    /** Updates mentor entities and sets up hover interactions */
-    useEffect(() => {
-        if (!viewer) return;
-
-        if (mentorEntities.current) {
-            viewer.entities.removeAll();
-            mentorEntities.current = null;
-        }
-
-        hoverStates.current.clear();
-
-        mentorEntities.current = new EntityCollection();
-
-        const batchSize = 50;
-        for (let i = 0; i < mentors.length; i += batchSize) {
-            const batch = mentors.slice(i, i + batchSize);
-            batch.forEach(mentor => {
-                createMentorEntity(viewer, mentor);
-            });
-        }
-
-        const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
-        handler.setInputAction((movement: { endPosition: Cartesian2 }) => {
-            const now = Date.now();
-            if (now - lastFrameTime.current < 1000 / frameRateLimit) return;
-            lastFrameTime.current = now;
-
-            debouncedUpdateHoverStates(viewer, movement, viewer.entities);
-        }, ScreenSpaceEventType.MOUSE_MOVE);
-
-        return () => {
-            debouncedUpdateHoverStates.cancel();
-            if (handler && !viewer.isDestroyed()) {
-                handler.destroy();
-            }
-        };
-
-    }, [viewer, mentors, createMentorEntity, debouncedUpdateHoverStates]);
-
-    useEffect(() => {
-        if (!viewer) return;
-
-        const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
-        const currentHoverStates = hoverStates.current;
-
-        handler.setInputAction(
-          debounce((movement: { endPosition: Cartesian2 }) => {
-            if (!mentorEntities.current) return;
-            updateHoverStates(viewer, movement, mentorEntities.current);
-          }, 50),
-          ScreenSpaceEventType.MOUSE_MOVE
-        );
-
-        return () => {
-          handler.destroy();
-          Array.from(currentHoverStates.keys()).forEach(id => {
-            currentHoverStates.set(id, false);
-          });
-        };
-    }, [viewer, updateHoverStates]);
-
-    useEffect(() => {
-        const currentHoverStates = hoverStates.current;
-        return () => {
-            if (viewer) {
-                viewer.entities.removeAll();
-                viewer.destroy();
-            }
-            currentHoverStates.clear();
-            mentorEntities.current = null;
-        };
-    }, [viewer]);
-
-    /** Sets up click handlers for mentor selection */
-    useEffect(() => {
-        if (!viewer) return;
-
-        const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
-        handler.setInputAction(handleClick, ScreenSpaceEventType.LEFT_CLICK);
-
-        return () => {
-            if (!viewer.isDestroyed()) {
-                handler.destroy();
-            }
-        };
-    }, [viewer, handleClick]);
-
     /** Initializes Cesium viewer and sets up click handlers */
     useEffect(() => {
         const container = cesiumContainer.current;
@@ -425,7 +529,8 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
         const initCesium = async (retryAttempt = 0) => {
             try {
                 setDebugStatus('Checking WebGL support...');
-                if (!checkWebGLSupport()) {
+                const gl = performanceUtils.setupWebGLContext();
+                if (!gl) {
                     throw new Error('WebGL is not supported or enabled on your browser.');
                 }
 
@@ -455,21 +560,25 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
                     scene3DOnly: true,
                     requestRenderMode: true,
                     maximumRenderTimeChange: Infinity,
-                    targetFrameRate: 60,
+                    targetFrameRate: isMobile ? 60 : 60,
                     terrain: undefined,
-                    baseLayer: new ImageryLayer(new OpenStreetMapImageryProvider({
-                        url: 'https://a.tile.openstreetmap.org/'
-                    }), {}),
+                    baseLayer: new ImageryLayer(
+                        performanceUtils.optimizeImageryProvider(isMobile),
+                        {}
+                    ),
                     contextOptions: {
                         webgl: {
-                            alpha: true,
-                            failIfMajorPerformanceCaveat: false,
+                            alpha: false,
+                            depth: true,
+                            stencil: false,
+                            antialias: !isMobile,
                             powerPreference: 'high-performance',
                             preserveDrawingBuffer: false,
-                            antialias: true,
-                        },
+                            failIfMajorPerformanceCaveat: false
+                        }
                     },
                     orderIndependentTranslucency: false,
+                    sceneMode: SceneMode.SCENE3D,
                 });
 
                 currentViewer = viewer;
@@ -494,6 +603,18 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
                 scene.globe.show = true;
                 scene.globe.enableLighting = false;
                 scene.globe.translucency.enabled = false;
+
+                if (isMobile) {
+                    scene.globe.maximumScreenSpaceError = 4;
+                    scene.fog.enabled = false;
+                    scene.fog.density = 0;
+                    scene.postProcessStages.fxaa.enabled = false;
+                    scene.globe.backFaceCulling = true;
+                    scene.globe.tileCacheSize = 25;
+                }
+
+                scene.globe.preloadSiblings = false;
+                scene.globe.tileCacheSize = isMobile ? 25 : 100;
 
                 container.style.position = 'fixed';
                 container.style.inset = '0';
@@ -552,6 +673,14 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
                 setError(null);
                 setRetryCount(0);
 
+                performanceUtils.optimizeScene(viewer.scene, isMobile);
+                performanceUtils.setupCamera(viewer.camera);
+
+                if (isMobile) {
+                    viewer.scene.globe.enableLighting = false;
+                    viewer.resolutionScale = 1.0;
+                }
+
             } catch (error) {
                 console.error('Error initializing Cesium:', error);
 
@@ -576,20 +705,7 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
                 setViewer(null);
             }
         };
-    }, [containerReady]);
-
-    const checkWebGLSupport = (): boolean => {
-        const canvas = document.createElement('canvas');
-        let gl: WebGLRenderingContext | null = null;
-
-        try {
-            gl = canvas.getContext('webgl') as WebGLRenderingContext | null;
-        } catch {
-            return false;
-        }
-
-        return !!gl;
-    };
+    }, [containerReady, isMobile]);
 
     if (!containerReady) {
         return (
