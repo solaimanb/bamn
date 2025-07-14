@@ -31,7 +31,10 @@ export function Header() {
         <header className="absolute top-0 left-0 right-0 z-50 px-4 lg:px-0">
             <div className="container mx-auto flex h-16 items-center justify-between gap-4">
                 <Link href="/" className="flex-shrink-0">
-                    <span className="text-xl font-bold">BAMN</span>
+                    <div className="flex items-center gap-1">
+                        <span className="text-2xl font-bold tracking-tight">[BAMN]</span>
+                        <span className="text-[0.6rem] uppercase tracking-widest text-muted-foreground">Bangladesh Academic <br /> Mentor Network</span>
+                    </div>
                 </Link>
 
                 <div className="flex items-center gap-4 flex-shrink-0">
