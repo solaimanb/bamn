@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { Mentor } from '@/types/mentor';
-import { GlobeVisualization } from '@/types/api';
+import { GlobeVisualization, MentorResponse } from '@/types/api';
 import { useSearchStore, SearchParams } from '@/store/searchStore';
 import { SearchBar } from '@/components/common/SearchBar';
 import { FloatingMentorSection } from './_components/FloatingMentorSection';
@@ -14,7 +14,7 @@ const MentorGlobeCesium = dynamic(() => import('./_components/MentorGlobeCesium'
   ssr: false,
 });
 
-type MentorLocation = Mentor | GlobeVisualization;
+type MentorLocation = GlobeVisualization | MentorResponse;
 
 const selectMentors = (state: { mentors: Mentor[] }) => state.mentors;
 const selectIsLoading = (state: { isLoading: boolean }) => state.isLoading;
@@ -24,9 +24,8 @@ const selectSetLoading = (state: { setLoading: (isLoading: boolean) => void }) =
 const selectClearSearch = (state: { clearSearch: () => void }) => state.clearSearch;
 
 export default function Home() {
-  const [selectedMentor, setSelectedMentor] = useState<MentorLocation | null>(null);
-  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
-  const [globeMentors, setGlobeMentors] = useState<GlobeVisualization[]>([]);
+  const [selectedMentor, setSelectedMentor] = useState<MentorResponse | null>(null);
+  const [globeMentors, setGlobeMentors] = useState<MentorResponse[]>([]);
   const mentors = useSearchStore(selectMentors);
   const isLoading = useSearchStore(selectIsLoading);
   const searchParams = useSearchStore(selectSearchParams);
@@ -44,8 +43,8 @@ export default function Home() {
   useEffect(() => {
     const loadGlobeMentors = async () => {
       try {
-        const globeData = await getMentorGlobeData();
-        setGlobeMentors(globeData);
+        const result = await getMentorGlobeData();
+        setGlobeMentors(result);
       } catch (error) {
         console.error('Failed to load globe data:', error);
       }
@@ -94,33 +93,16 @@ export default function Home() {
   }, [searchParams, setMentors, setLoading]);
 
   const handleMentorClick = (mentor: MentorLocation) => {
-    setSelectedMentor(mentor);
-
-    if (!('email' in mentor)) {
-      setIsLoadingDetails(true);
-      const loadFullMentorDetails = async () => {
-        try {
-          const result = await listMentors({
-            keyword: mentor.full_name,
-            page: 1,
-            page_size: 1
-          });
-          if (result.items.length > 0) {
-            setSelectedMentor(result.items[0]);
-          }
-        } catch (error) {
-          console.error('Failed to load mentor details:', error);
-        } finally {
-          setIsLoadingDetails(false);
-        }
-      };
-      loadFullMentorDetails();
+    const mentorList = mentors.length > 0 ? mentors : globeMentors;
+    const fullMentor = mentorList.find(m => m.id === mentor.id) as MentorResponse;
+    if (fullMentor) {
+      setSelectedMentor(fullMentor);
     }
   };
 
   return (
     <div className="min-h-screen relative">
-      <div className="absolute top-12 left-1/2 -translate-x-1/2 z-10 w-full max-w-2xl px-4">
+      <div className="absolute lg:top-12 top-20 left-1/2 -translate-x-1/2 z-10 w-full max-w-2xl px-4">
         <SearchBar />
       </div>
 
@@ -140,7 +122,7 @@ export default function Home() {
       <MentorDialog
         selectedMentor={selectedMentor}
         setSelectedMentor={setSelectedMentor}
-        isLoading={isLoadingDetails}
+        isLoading={false}
       />
     </div>
   );

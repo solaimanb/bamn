@@ -191,18 +191,18 @@ async def get_own_profile(
 
 @router.get(
     "/globe",
-    response_model=List[GlobeVisualization],
+    response_model=List[MentorResponse],
     summary="Globe Data",
     description="""
     Get mentor data formatted for globe visualization.
-    Returns location and research data for approved mentors.
+    Returns full mentor data for approved mentors.
     No authentication required - this endpoint is public.
     """
 )
 async def get_globe_data(
     db: AsyncSession = Depends(deps.get_db),
     research_interests: List[str] = Query([], description="Filter by research interests")
-) -> List[GlobeVisualization]:
+) -> List[MentorResponse]:
     """Get mentor data for globe visualization"""
     query = select(Mentor).where(Mentor.moderation_status == ModerationStatus.APPROVED)
     

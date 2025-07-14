@@ -6,6 +6,7 @@ import type { Mentor } from "@/types/mentor"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import { ProfileMap } from "./ProfileMap"
+import { Card } from "@/components/ui/card"
 
 interface MentorProfileProps {
     mentor: Mentor
@@ -19,9 +20,9 @@ export const MentorProfile = memo(function MentorProfile({ mentor }: MentorProfi
         .toUpperCase()
 
     return (
-        <div className="pt-20">
+        <div className="pt-16 lg:pt-20">
             <div className="max-w-3xl mx-auto px-6 py-8">
-                <div className="flex items-start gap-4 mb-8">
+                <Card className="flex lg:flex-row gap-4 mb-8 borde p-6 shadow-sm">
                     <Avatar size={100} className="h-16 w-16">
                         <AvatarImage src={mentor?.profile_picture_url || "/profile.png"} alt={mentor.full_name} />
                         <AvatarFallback className="bg-blue-500 text-sm font-black">{initials}</AvatarFallback>
@@ -35,7 +36,7 @@ export const MentorProfile = memo(function MentorProfile({ mentor }: MentorProfi
                             <span>{mentor.city}, {mentor.country}</span>
                         </div>
                     </div>
-                </div>
+                </Card>
 
                 {/* About Section */}
                 <div className="mb-8">

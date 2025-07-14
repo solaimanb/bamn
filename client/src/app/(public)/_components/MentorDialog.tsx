@@ -1,6 +1,5 @@
-import { X, MapPin, Mail, ArrowRight } from 'lucide-react'
-import { Mentor } from '@/types/mentor';
-import { GlobeVisualization } from '@/types/api';
+import { X, MapPin, Mail, ArrowRight, GraduationCap, Building2 } from 'lucide-react'
+import { MentorResponse } from '@/types/api';
 import Link from 'next/link';
 
 import {
@@ -13,34 +12,28 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardFooter } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
-import { Skeleton } from "@/components/ui/skeleton"
-
-type MentorLocation = Mentor | GlobeVisualization;
 
 interface MentorDialogProps {
-    selectedMentor: MentorLocation | null;
-    setSelectedMentor: (mentor: MentorLocation | null) => void;
-    isLoading?: boolean;
+    selectedMentor: MentorResponse | null;
+    setSelectedMentor: (mentor: MentorResponse | null) => void;
+    isLoading: boolean;
 }
 
-const MentorDialog: React.FC<MentorDialogProps> = ({ selectedMentor, setSelectedMentor, isLoading = false }) => {
-    const isFullMentor = selectedMentor && 'email' in selectedMentor;
-    const showSkeleton = !isFullMentor || isLoading;
-
+const MentorDialog: React.FC<MentorDialogProps> = ({ selectedMentor, setSelectedMentor }) => {
     return (
         <Dialog open={!!selectedMentor} onOpenChange={(open: boolean) => !open && setSelectedMentor(null)}>
-            <DialogContent className="max-w-md p-0 text-foreground">
+            <DialogContent className="max-w-[95vw] lg:max-w-lg mx-auto p-0 text-foreground">
                 {selectedMentor && (
-                    <Card className="border-0 bg-transparent relative">
+                    <Card className="border-0 bg-transparent relative mx-2 sm:mx-0">
                         <Button
                             size="icon"
                             onClick={() => setSelectedMentor(null)}
-                            className="absolute right-2 top-2 z-10 h-6 w-6 rounded-sm border-none bg-red-500 hover:bg-red-600 transition-colors"
+                            className="absolute right-2 top-2 z-10 h-6 w-6 rounded-sm border-none bg-red-500 hover:bg-red-600 transition-colors outline-none"
                         >
                             <X size={20} />
                         </Button>
 
-                        <CardHeader>
+                        <CardHeader className="px-4 sm:px-6">
                             <div className="flex items-start gap-4">
                                 <Avatar className="h-12 w-12 bg-indigo-500">
                                     <AvatarFallback className="text-2xl font-bold">
@@ -51,23 +44,22 @@ const MentorDialog: React.FC<MentorDialogProps> = ({ selectedMentor, setSelected
                                     <DialogTitle className="text-xl font-bold mb-1 leading-tight">
                                         {selectedMentor.full_name}
                                     </DialogTitle>
-                                    {showSkeleton ? (
-                                        <>
-                                            <Skeleton className="h-4 w-3/4 mb-2" />
-                                            <Skeleton className="h-4 w-1/2" />
-                                        </>
-                                    ) : (
-                                        <>
-                                            {selectedMentor.current_role && (
-                                                <p className="mb-1 text-sm">{selectedMentor.current_role}</p>
-                                            )}
-                                            {selectedMentor.department && (
-                                                <p className="text-xs leading-relaxed">{selectedMentor.department}</p>
-                                            )}
-                                            {selectedMentor.institution && (
-                                                <p className="text-xs leading-relaxed">{selectedMentor.institution}</p>
-                                            )}
-                                        </>
+                                    {selectedMentor.current_role && (
+                                        <div className="mb-2">
+                                            <p className="text-sm">{selectedMentor.current_role}</p>
+                                        </div>
+                                    )}
+                                    {selectedMentor.department && (
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <GraduationCap className="w-4 h-4 text-gray-500" />
+                                            <p className="text-xs leading-relaxed">{selectedMentor.department}</p>
+                                        </div>
+                                    )}
+                                    {selectedMentor.institution && (
+                                        <div className="flex items-center gap-2">
+                                            <Building2 className="w-4 h-4 text-gray-500" />
+                                            <p className="text-xs leading-relaxed">{selectedMentor.institution}</p>
+                                        </div>
                                     )}
                                 </div>
                             </div>
@@ -75,17 +67,13 @@ const MentorDialog: React.FC<MentorDialogProps> = ({ selectedMentor, setSelected
 
                         <Separator className="" />
 
-                        <CardContent>
+                        <CardContent className="px-4 sm:px-6">
                             <div className="space-y-4">
                                 <div>
                                     <h3 className="font-bold mb-4 text-sm tracking-wider uppercase">ABOUT</h3>
-                                    {showSkeleton ? (
-                                        <Skeleton className="h-20 w-full " />
-                                    ) : (
-                                        <p className="text-sm leading-relaxed">
-                                            {`Dr. is a ${selectedMentor.current_role} at ${selectedMentor.institution}. Their research focuses on advanced topics with real-world applications.`}
-                                        </p>
-                                    )}
+                                    <p className="text-sm leading-relaxed">
+                                        {`Dr. ${selectedMentor.full_name.split(' ')[1]} is a ${selectedMentor.current_role} at ${selectedMentor.institution}. Their research focuses on advanced topics with real-world applications.`}
+                                    </p>
                                 </div>
 
                                 <Separator className="" />
@@ -108,51 +96,36 @@ const MentorDialog: React.FC<MentorDialogProps> = ({ selectedMentor, setSelected
                                 <Separator className="" />
 
                                 <div className="grid grid-cols-2 gap-6">
-                                    {showSkeleton ? (
-                                        <>
-                                            <div>
-                                                <p className="text-xs uppercase tracking-wider mb-2 font-medium">LOCATION</p>
-                                                <Skeleton className="h-6 w-full " />
+                                    {selectedMentor.city && (
+                                        <div>
+                                            <p className="text-xs uppercase tracking-wider mb-2 font-medium">LOCATION</p>
+                                            <div className="flex items-center gap-2">
+                                                <MapPin className="w-4 h-4" />
+                                                <span className="text-sm">
+                                                    {`${selectedMentor.city}, ${selectedMentor.country}`}
+                                                </span>
                                             </div>
-                                            <div>
-                                                <p className="text-xs uppercase tracking-wider mb-2 font-medium">EMAIL</p>
-                                                <Skeleton className="h-6 w-full " />
+                                        </div>
+                                    )}
+                                    {selectedMentor.email && (
+                                        <div>
+                                            <p className="text-xs uppercase tracking-wider mb-2 font-medium">EMAIL</p>
+                                            <div className="flex items-center gap-2">
+                                                <Mail className="w-4 h-4" />
+                                                <a
+                                                    href={`mailto:${selectedMentor.email}`}
+                                                    className="text-blue-500 hover:text-blue-400 transition-colors text-sm break-all"
+                                                >
+                                                    {selectedMentor.email}
+                                                </a>
                                             </div>
-                                        </>
-                                    ) : (
-                                        <>
-                                            {selectedMentor.city && (
-                                                <div>
-                                                    <p className="text-xs uppercase tracking-wider mb-2 font-medium">LOCATION</p>
-                                                    <div className="flex items-center gap-2">
-                                                        <MapPin className="w-4 h-4 " />
-                                                        <span className="text-sm">
-                                                            {`${selectedMentor.city}, ${selectedMentor.country}`}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            )}
-                                            {selectedMentor.email && (
-                                                <div>
-                                                    <p className="text-xs uppercase tracking-wider mb-2 font-medium">EMAIL</p>
-                                                    <div className="flex items-center gap-2">
-                                                        <Mail className="w-4 h-4 " />
-                                                        <a
-                                                            href={`mailto:${selectedMentor.email}`}
-                                                            className="text-blue-500 hover:text-blue-400 transition-colors text-sm break-all"
-                                                        >
-                                                            {selectedMentor.email}
-                                                        </a>
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </>
+                                        </div>
                                     )}
                                 </div>
                             </div>
                         </CardContent>
 
-                        <CardFooter>
+                        <CardFooter className="px-4 sm:px-6">
                             <Button
                                 asChild
                                 className="w-full bg-blue-500 hover:bg-blue-600 text-white"

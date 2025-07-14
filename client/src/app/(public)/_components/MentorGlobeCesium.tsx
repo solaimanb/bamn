@@ -480,16 +480,20 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
 
     /** Sets up click handlers for mentor selection */
     useEffect(() => {
-        if (!viewer) return;
+        if (!viewer || !viewer.scene || viewer.isDestroyed()) return;
 
-        const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
-        handler.setInputAction(handleClick, ScreenSpaceEventType.LEFT_CLICK);
+        try {
+            const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
+            handler.setInputAction(handleClick, ScreenSpaceEventType.LEFT_CLICK);
 
-        return () => {
-            if (!viewer.isDestroyed()) {
-                handler.destroy();
-            }
-        };
+            return () => {
+                if (handler && !handler.isDestroyed()) {
+                    handler.destroy();
+                }
+            };
+        } catch (error) {
+            console.error('Error setting up click handler:', error);
+        }
     }, [viewer, handleClick]);
 
     /** Initializes container dimensions and sets up resize observer */
@@ -528,6 +532,14 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
 
         const initCesium = async (retryAttempt = 0) => {
             try {
+                if (currentViewer) {
+                    if (!currentViewer.isDestroyed()) {
+                        currentViewer.destroy();
+                    }
+                    currentViewer = null;
+                    setViewer(null);
+                }
+
                 setDebugStatus('Checking WebGL support...');
                 const gl = performanceUtils.setupWebGLContext();
                 if (!gl) {
@@ -544,6 +556,8 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
                 if (retryAttempt > 0) {
                     await new Promise(resolve => setTimeout(resolve, retryDelay));
                 }
+
+                if (!mounted) return;
 
                 const viewer = new Viewer(container, {
                     animation: false,
@@ -588,8 +602,11 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
                     return;
                 }
 
-                viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
-                viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(ScreenSpaceEventType.LEFT_CLICK);
+                // Remove default handlers before adding our own
+                if (viewer.cesiumWidget && viewer.cesiumWidget.screenSpaceEventHandler) {
+                    viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+                    viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(ScreenSpaceEventType.LEFT_CLICK);
+                }
 
                 const scene = viewer.scene;
                 scene.globe.enableLighting = false;
@@ -684,6 +701,14 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
             } catch (error) {
                 console.error('Error initializing Cesium:', error);
 
+                if (currentViewer) {
+                    if (!currentViewer.isDestroyed()) {
+                        currentViewer.destroy();
+                    }
+                    currentViewer = null;
+                    setViewer(null);
+                }
+
                 if (mounted && retryAttempt < maxRetries) {
                     setDebugStatus(`Retrying initialization (Attempt ${retryAttempt + 1}/${maxRetries})...`);
                     setRetryCount(retryAttempt + 1);
@@ -700,8 +725,11 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
 
         return () => {
             mounted = false;
-            if (currentViewer && !currentViewer.isDestroyed()) {
-                currentViewer.destroy();
+            if (currentViewer) {
+                if (!currentViewer.isDestroyed()) {
+                    currentViewer.destroy();
+                }
+                currentViewer = null;
                 setViewer(null);
             }
         };
