@@ -55,7 +55,7 @@ export function LoginForm() {
         setError(null)
     }
 
-    const handleLoginSuccess = (message: string) => {
+    const handleLoginSuccess = async (message: string) => {
         form.reset()
         toast.success("Welcome back!", {
             description: message,

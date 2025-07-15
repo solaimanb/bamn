@@ -5,6 +5,7 @@ import { verifyToken } from '@/lib/auth';
 export async function middleware(request: NextRequest) {
     const token = request.cookies.get('token')?.value;
 
+    // Handle login page access
     if (request.nextUrl.pathname.startsWith('/login')) {
         if (token) {
             try {
@@ -17,6 +18,7 @@ export async function middleware(request: NextRequest) {
         return NextResponse.next();
     }
 
+    // Handle dashboard access
     if (request.nextUrl.pathname.startsWith('/dashboard')) {
         if (!token) {
             return NextResponse.redirect(new URL('/login', request.url));
@@ -24,8 +26,7 @@ export async function middleware(request: NextRequest) {
 
         try {
             const user = await verifyToken(token);
-
-            if (user.role === 'mentor' && request.nextUrl.pathname === '/dashboard') {
+            if (user.role === 'mentor' && request.nextUrl.pathname !== '/dashboard/profile') {
                 return NextResponse.redirect(new URL('/dashboard/profile', request.url));
             }
 

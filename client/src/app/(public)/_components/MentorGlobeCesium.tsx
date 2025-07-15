@@ -49,18 +49,18 @@ interface MentorGlobeCesiumProps {
 const PERFORMANCE_CONSTANTS = {
     MOBILE_BREAKPOINT: 768,
     FRAME_RATE_LIMIT: 30,
-    HOVER_THROTTLE_MS: 100, // Increased from 32 for better mobile performance
-    BATCH_SIZE: 25, // Reduced from 50 for mobile
-    GRID_SIZE: 2, // Increased from 1 for better spatial indexing
+    HOVER_THROTTLE_MS: 100,
+    BATCH_SIZE: 25,
+    GRID_SIZE: 2,
     HOVER_RADIUS_PX: 40,
     MOBILE_TILE_SIZE: 256,
     DESKTOP_TILE_SIZE: 512,
-    MIN_ZOOM_DISTANCE: 2000000, // Increased from 1000000 for smoother mobile experience
-    MAX_ZOOM_DISTANCE: 20000000,
+    MIN_ZOOM_DISTANCE: 500000,
+    MAX_ZOOM_DISTANCE: 25000000,
     CAMERA_BOUNDS: Rectangle.fromDegrees(-180, -85, 180, 85),
     TERRAIN_EXAGGERATION: 1.0,
-    CAMERA_MOVEMENT_SPEED: 0.8, // Reduced from 1.5 for smoother control
-    TOUCH_MOVEMENT_SPEED: 0.3,  // Reduced from 0.5 for better touch control
+    CAMERA_MOVEMENT_SPEED: 0.8,
+    TOUCH_MOVEMENT_SPEED: 0.3,
     INERTIA_ENABLED: true,
     MOBILE_FRAME_RATE: 30,
     DESKTOP_FRAME_RATE: 60,
@@ -78,12 +78,18 @@ const performanceUtils = {
                 stencil: false,
                 antialias: false,
                 powerPreference: 'high-performance',
-                failIfMajorPerformanceCaveat: true, // Prevent fallback to software rendering
+                failIfMajorPerformanceCaveat: true,
                 preserveDrawingBuffer: false,
-                premultipliedAlpha: false, // Reduce memory usage
-                desynchronized: true // Reduce latency
+                premultipliedAlpha: true,
+                desynchronized: false
             };
-            return canvas.getContext('webgl', contextAttributes) as WebGLRenderingContext;
+            const gl = canvas.getContext('webgl', contextAttributes) as WebGLRenderingContext;
+
+            if (gl) {
+                gl.hint(gl.GENERATE_MIPMAP_HINT, gl.FASTEST);
+            }
+
+            return gl;
         } catch {
             return null;
         }
@@ -95,11 +101,11 @@ const performanceUtils = {
         scene.globe.showGroundAtmosphere = false;
         scene.globe.showWaterEffect = false;
         scene.globe.backFaceCulling = true;
-        scene.globe.tileCacheSize = isMobile ? 15 : 100; // Reduced from 25 for mobile
-        scene.globe.maximumScreenSpaceError = isMobile ? 6 : 2; // Increased from 3 for better mobile performance
+        scene.globe.tileCacheSize = isMobile ? 15 : 100;
+        scene.globe.maximumScreenSpaceError = isMobile ? 4 : 2;
         scene.globe.baseColor = Color.WHITE;
         scene.globe.translucency.enabled = false;
-        scene.globe.preloadSiblings = false;
+        scene.globe.preloadSiblings = true;
         scene.globe.terrainExaggeration = PERFORMANCE_CONSTANTS.TERRAIN_EXAGGERATION;
         scene.globe.enableLighting = false;
         scene.globe.atmosphereLightIntensity = 0;
@@ -127,15 +133,15 @@ const performanceUtils = {
         controller.minimumZoomDistance = PERFORMANCE_CONSTANTS.MIN_ZOOM_DISTANCE;
         controller.maximumZoomDistance = PERFORMANCE_CONSTANTS.MAX_ZOOM_DISTANCE;
         controller.enableTilt = false;
-        controller.minimumCollisionTerrainHeight = 15000;
-        controller.bounceAnimationTime = 0.4;
-        controller.maximumMovementRatio = isMobile ? 0.1 : 0.3;
+        controller.minimumCollisionTerrainHeight = 7500;
+        controller.bounceAnimationTime = 0.3;
+        controller.maximumMovementRatio = isMobile ? 0.15 : 0.3;
 
         // Touch-specific optimizations
         if (isMobile) {
-            controller.inertiaSpin = 0.5;           // Reduced from 0.9
-            controller.inertiaTranslate = 0.5;      // Reduced from 0.9
-            controller.inertiaZoom = 0.4;           // Reduced from 0.8
+            controller.inertiaSpin = 0.5;
+            controller.inertiaTranslate = 0.5;
+            controller.inertiaZoom = 0.4;
 
             controller.zoomEventTypes = [
                 CameraEventType.PINCH,
@@ -172,18 +178,17 @@ const performanceUtils = {
 
     setupCamera: (camera: Camera, isMobile: boolean) => {
         // Optimize camera movement
-        camera.defaultMoveAmount = isMobile ? 
-            PERFORMANCE_CONSTANTS.TOUCH_MOVEMENT_SPEED : 
+        camera.defaultMoveAmount = isMobile ?
+            PERFORMANCE_CONSTANTS.TOUCH_MOVEMENT_SPEED :
             PERFORMANCE_CONSTANTS.CAMERA_MOVEMENT_SPEED;
-            
-        camera.defaultLookAmount = isMobile ? 0.3 : 1.0;
-        camera.defaultRotateAmount = isMobile ? 0.3 : 1.0;
-        camera.defaultZoomAmount = isMobile ? 0.3 : 1.0;
+
+        camera.defaultLookAmount = isMobile ? 0.3 : 0.8;
+        camera.defaultRotateAmount = isMobile ? 0.3 : 0.8;
+        camera.defaultZoomAmount = isMobile ? 0.4 : 0.8;
 
         // Constrain camera movement
         camera.constrainedAxis = Cartesian3.UNIT_Z;
-        camera.maximumZoomFactor = isMobile ? 3 : 5;
-        // Removed unsupported maximumMovementRatio property
+        camera.maximumZoomFactor = isMobile ? 4 : 6;
     },
 
     optimizeImageryProvider: (isMobile: boolean) => {
@@ -297,6 +302,10 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
                 scaleByDistance: new NearFarScalar(1.5e6, 1.0, 3.0e7, 0.1),
                 translucencyByDistance: new NearFarScalar(1.5e6, 1.0, 3.0e7, 1.0),
                 disableDepthTestDistance: 0,
+                sizeInMeters: false,  // Added to help with texture scaling
+                alignedAxis: Cartesian3.ZERO,  // Added to optimize rendering
+                pixelOffset: new Cartesian2(0, 0),  // Added for better positioning
+                eyeOffset: new Cartesian3(0.0, 0.0, 0.0),  // Added for depth consistency
             }),
             id: mentor.id,
             description: undefined,
@@ -761,11 +770,11 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
     // Add memory management
     const cleanupResources = useCallback(() => {
         if (!viewer) return;
-        
+
         // Clear entity references
         mentorEntities.current = null;
         hoverStates.current.clear();
-        
+
         // Clear memory and force re-render
         viewer.scene.globe.tileCacheSize = 0;
         viewer.scene.requestRender();
@@ -774,7 +783,7 @@ export default function MentorGlobeCesium({ mentors = [], onMentorClick }: Mento
     // Add periodic cleanup for mobile
     useEffect(() => {
         if (!isMobile || !viewer) return;
-        
+
         const interval = setInterval(cleanupResources, 60000); // Every minute
         return () => clearInterval(interval);
     }, [isMobile, viewer, cleanupResources]);
