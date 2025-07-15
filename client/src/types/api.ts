@@ -62,6 +62,7 @@ export interface MentorResponse extends MentorBase {
   role: 'mentor';
   moderation_status: 'pending' | 'approved' | 'rejected';
   auth_provider: 'email' | 'google' | 'orcid';
+  avatar_url?: string;
 }
 
 export interface GlobeVisualization {

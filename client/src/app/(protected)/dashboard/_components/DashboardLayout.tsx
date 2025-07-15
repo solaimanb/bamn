@@ -195,7 +195,7 @@ function DashboardContent({ user, children }: { user: User | MentorResponse, chi
             <Menu size={20} />
           </SidebarTrigger>
         </div>
-        <div className="px-6 pb-6 w-full h-[calc(100vh-3.5rem)] overflow-hidden">
+        <div className="px-6 pb-6 w-full h-[calc(100vh-3.5rem)] overflow-y-auto">
           {children}
         </div>
       </main>

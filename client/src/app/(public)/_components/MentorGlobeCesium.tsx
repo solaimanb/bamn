@@ -179,7 +179,7 @@ const performanceUtils = {
         camera.defaultLookAmount = isMobile ? 0.3 : 1.0;
         camera.defaultRotateAmount = isMobile ? 0.3 : 1.0;
         camera.defaultZoomAmount = isMobile ? 0.3 : 1.0;
-        
+
         // Constrain camera movement
         camera.constrainedAxis = Cartesian3.UNIT_Z;
         camera.maximumZoomFactor = isMobile ? 3 : 5;
